@@ -10,10 +10,10 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-name: "Code Review by Gemini AI"
+name: "Code Review by Gemini AI with Full Context"
 description: "Automatically create a comment about differences in a pull request by Gemini AI"
 
-author: "rubensflinco"
+author: "M0ch0"
 
 inputs:
   gemini_api_key:
