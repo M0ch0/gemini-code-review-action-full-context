@@ -119,9 +119,9 @@ def get_review(
     review_prompt = get_review_prompt(extra_prompt=extra_prompt)
     generation_config = {
         "temperature": temperature,
-        "top_p": top_p,
-        "top_k": 40,
-        "max_output_tokens": max_tokens,
+        "topP": top_p,
+        "topK": 40,
+        "maxOutputTokens": max_tokens,
     }
     
     safety_settings = {
