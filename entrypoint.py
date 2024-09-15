@@ -120,7 +120,8 @@ def get_review(
         "temperature": temperature,
         "top_p": top_p,
         "top_k": 40,
-        "max_output_tokens": max_tokens,
+        "max_output_tokens": 8192,
+        "response_mime_type": "text/plain",
     }
     
     safety_settings = {
@@ -205,8 +206,6 @@ def main(
         frequency_penalty=frequency_penalty,
         presence_penalty=presence_penalty
     )
-    
-    logger.debug(f"Review: {review}")
 
     # Format reviews
 
@@ -216,7 +215,7 @@ def main(
         github_repository=os.getenv("GITHUB_REPOSITORY"),
         pull_request_number=int(os.getenv("GITHUB_PULL_REQUEST_NUMBER")),
         git_commit_hash=os.getenv("GIT_COMMIT_HASH"),
-        body=review
+        body=review.text
     )
 
 
