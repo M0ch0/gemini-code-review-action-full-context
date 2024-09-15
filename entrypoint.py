@@ -42,16 +42,17 @@ def get_review_prompt(extra_prompt: str = "") -> str:
     As an excellent software engineer and security expert, please analyze the pull request (just the pull request. The whole project is just a reference, so you don't need to review the whole thing, just the pull request) Consider the following:
 
     1. Overall pull request structure and code quality
-    2. Potential security vulnerabilities in the changed code
+    2. Potential security vulnerabilities in the changed code, if any
     3. Changes introduced in the pull request
-    4. Improvements or issues in the pull request
-    5. Suggestions for better code organization, performance, or security
+    4. Improvements or issues in the pull request, if any
+    5. Suggestions for better code organization, performance, or security, if any
 
     Provide a comprehensive review that includes:
     - A summary of the pull request structure and any notable patterns or issues
     - Comments on specific files or sections of pull request that require attention
     - Detailed analysis of the changes in the pull request
-    - Suggestions for improvements or alternative implementations
+    - Suggestions for improvements or alternative implementations, if any
+    - Conclusion and Approval/Rejection of the pull request
 
     {extra_prompt}
 
@@ -64,8 +65,8 @@ def get_summarize_prompt() -> str:
     template = """
     Please provide a concise summary of your review, highlighting the most important findings and recommendations. Focus on:
 
-    1. Key strengths and weaknesses of the pull request
-    2. Critical issues or improvements needed in the pull request
+    1. Key strengths and weaknesses of the pull request, if any
+    2. Critical issues or improvements needed in the pull request, if any
     3. High-priority security concerns, if any
 
     Your summary should give a clear overview of the impact of the pull request.
@@ -234,9 +235,8 @@ def main(
     # Read the entire project content
     project_content = read_project_files()
 
-    # Combine project content and diff
-    full_context = f"Project Content:\n\n{project_content}\n\nPull Request Diff:\n\n{diff}"
-
+    logger.debug(f"Project content: {project_content}")
+    
     # Request a code review
     chunked_reviews, summarized_review = get_review(
         context=project_content,
