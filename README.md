@@ -1,11 +1,15 @@
-# gemini-code-review-action
-A container GitHub Action to review a pull request by Gemini AI.
+# gemini-code-review-action-full-context
+
+A container GitHub Action to review a pull request by Gemini AI, considering the full context of the project.
+
+This action analyzes the entire project structure and content, followed by the pull request diff. It provides a comprehensive review that takes into account the broader context of the changes.
 
 If the size of a pull request is over the maximum chunk size of the Gemini API, the Action will split the pull request into multiple chunks and generate review comments for each chunk.
-And then the Action summarizes the review comments and posts a review comment to the pull request.
+The Action then summarizes the review comments and posts a review comment to the pull request.
 
 ## Pre-requisites
-We have to set a GitHub Actions secret `GEMINI_API_KEY` to use the Gemini API so that we securely pass it to the Action.
+
+Set a GitHub Actions secret `GEMINI_API_KEY` to use the Gemini API securely.
 
 ## Inputs
 
@@ -17,21 +21,14 @@ We have to set a GitHub Actions secret `GEMINI_API_KEY` to use the Gemini API so
 - `pull_request_diff`: The diff of the pull request to generate a review comment.
 - `pull_request_diff_chunk_size`: The chunk size of the diff of the pull request to generate a review comment.
 - `extra_prompt`: The extra prompt to generate a review comment.
-- `model`: The model to generate a review comment. We can use a model which is available.
+- `model`: The model to generate a review comment. We can use any available model.
 - `log_level`: The log level to print logs.
 
-As you might know, a model of Gemini has limitation of the maximum number of input tokens.
-So we have to split the diff of a pull request into multiple chunks, if the size of the diff is over the limitation.
-We can tune the chunk size based on the model we use.
+Note: The Gemini model has a limitation on the maximum number of input tokens. If the size of the diff exceeds this limit, it will be split into multiple chunks. You can adjust the chunk size based on the model you use.
 
 ## Example usage
-Here is an example to use the Action to review a pull request of the repository.
-The actual file is located at [`.github/workflows/ai-code-review.yml`](.github/workflows/ai-code-review.yml).
-We set `extra_prompt` to `Sempre responda em português brasileiro!`.
-We aim to make GPT review a pull request from a point of view of a Python developer.
 
-As a result of an execution of the Action, the Action posts a review comment to the pull request like the following image.
-![An example comment of the code review](./docs/images/example.png)
+Here's an example of how to use the Action to review a pull request in your repository:
 
 ```yaml
 name: "Code Review by Gemini AI"
@@ -63,7 +60,7 @@ jobs:
             cat "diff.txt";
             echo 'EOF';
           } >> $GITHUB_OUTPUT
-      - uses: rubensflinco/gemini-code-review-action@1.0.5
+      - uses: M0ch0/gemini-code-review-action-full-context@0.1.1
         name: "Code Review by Gemini AI"
         id: review
         with:
@@ -72,11 +69,22 @@ jobs:
           github_repository: ${{ github.repository }}
           github_pull_request_number: ${{ github.event.pull_request.number }}
           git_commit_hash: ${{ github.event.pull_request.head.sha }}
-          model: "gemini-1.5-pro-latest"
+          model: "gemini-1.5-pro-exp-0827"
           pull_request_diff: |-
             ${{ steps.get_diff.outputs.pull_request_diff }}
-          pull_request_chunk_size: "3500"
+          pull_request_chunk_size: "1500000"
           extra_prompt: |-
-            Sempre responda em português brasileiro!
+            Code reviews need to be multifaceted, critical, thoughtful and excellent.
           log_level: "DEBUG"
 ```
+
+
+## Output
+
+The Action posts a review comment to the pull request, which includes (if gemini works well):
+
+1. A summary of the pull request structure and any notable patterns or issues
+2. Comments on specific files or sections of the pull request that require attention, if any
+3. Detailed analysis of the changes in the pull request, if any
+4. Suggestions for improvements or alternative implementations, if any
+5. Conclusion and Approval/Rejection of the pull request
