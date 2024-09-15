@@ -36,22 +36,39 @@ def check_required_env_vars():
 def get_review_prompt(extra_prompt: str = "") -> str:
     """Get a prompt template"""
     template = f"""
-    This is a pull request or part of a pull request if the pull request is very large.
-    Suppose you review this PR as an excellent software engineer and an excellent security engineer.
-    Can you tell me the issues with differences in a pull request and provide suggestions to improve it?
-    You can provide a review summary and issue comments per file if any major issues are found.
-    Always include the name of the file that is citing the improvement or problem.
-    In the next messages I will be sending you the difference between the GitHub file codes, okay?
+    You are reviewing a project and its associated pull request. The context provided includes the entire project structure and content, followed by the pull request diff.
+
+    As an excellent software engineer and security expert, please analyze the project and the changes in the pull request. Consider the following:
+
+    1. Overall project structure and code quality
+    2. Potential security vulnerabilities in the existing code
+    3. Changes introduced in the pull request
+    4. Improvements or issues in the pull request
+    5. Suggestions for better code organization, performance, or security
+
+    Provide a comprehensive review that includes:
+    - A summary of the project structure and any notable patterns or issues
+    - Comments on specific files or sections of code that require attention
+    - Detailed analysis of the changes in the pull request
+    - Suggestions for improvements or alternative implementations
+
+    {extra_prompt}
+
+    Please begin your review now.
     """
     return template
-
 
 def get_summarize_prompt() -> str:
     """Get a prompt template"""
     template = """
-    Can you summarize this for me?
-    It would be good to stick to highlighting pressing issues and providing code suggestions to improve the pull request.
-    Here's what you need to summarize:
+    Please provide a concise summary of your review, highlighting the most important findings and recommendations. Focus on:
+
+    1. Key strengths and weaknesses of the project
+    2. Critical issues or improvements needed in the pull request
+    3. High-priority security concerns, if any
+    4. Top recommendations for enhancing the project and the proposed changes
+
+    Your summary should give a clear overview of the project state and the impact of the pull request.
     """
     return template
 
@@ -86,9 +103,9 @@ def chunk_string(input_string: str, chunk_size) -> List[str]:
 
 
 def get_review(
-        model: str,
-        diff: str,
+        context: str,
         extra_prompt: str,
+        model: str,
         temperature: float,
         max_tokens: int,
         top_p: float,
@@ -99,17 +116,18 @@ def get_review(
     """Get a review"""
     # Chunk the prompt
     review_prompt = get_review_prompt(extra_prompt=extra_prompt)
-    chunked_diff_list = chunk_string(input_string=diff, chunk_size=prompt_chunk_size)
+    chunked_context_list = chunk_string(input_string=context, chunk_size=prompt_chunk_size)
     generation_config = {
-        "temperature": 1,
-        "top_p": 0.95,
-        "top_k": 0,
-        "max_output_tokens": 8192,
+        "temperature": temperature,
+        "top_p": top_p,
+        "top_k": 40,
+        "max_output_tokens": max_tokens,
     }
-    genai_model = genai.GenerativeModel(model_name=model,generation_config=generation_config,system_instruction=extra_prompt)
+    genai_model = genai.GenerativeModel(model_name=model, generation_config=generation_config)
+    
     # Get summary by chunk
     chunked_reviews = []
-    for chunked_diff in chunked_diff_list:
+    for chunked_context in chunked_context_list:
         convo = genai_model.start_chat(history=[
             {
                 "role": "user",
@@ -117,14 +135,13 @@ def get_review(
             },
             {
                 "role": "model",
-                "parts": ["Ok"]
+                "parts": ["Understood. I'm ready to review the project and pull request."]
             },
         ])
-        convo.send_message(chunked_diff)
+        convo.send_message(chunked_context)
         review_result = convo.last.text
         logger.debug(f"Response AI: {review_result}")
         chunked_reviews.append(review_result)
-    # If the chunked reviews are only one, return it
 
     if len(chunked_reviews) == 1:
         return chunked_reviews, chunked_reviews[0]
@@ -153,6 +170,22 @@ def format_review_comment(summarized_review: str, chunked_reviews: List[str]) ->
     </details>
     """
     return review
+
+
+def read_project_files(exclude_dirs=['.github', '.idea']):
+    project_content = []
+    for root, dirs, files in os.walk('.'):
+        dirs[:] = [d for d in dirs if d not in exclude_dirs]
+        for file in files:
+            if file.endswith(('.py', '.yml', '.yaml', '.md', '.txt', '.json', '.kt', '.html', '.js',
+                              '.ts', '.css', '.java', '.c', '.cpp', '.h', '.hpp', '.go', '.rs', '.swift',
+                              '.sh', '.rb', '.php', '.mdx', '.rs', '.sql', '.ini', '.cfg', '.conf', '.toml',
+                              '.env', '.cfg', '.conf', '.toml', '.ini', '.txt', '.xml')):
+                file_path = os.path.join(root, file)
+                with open(file_path, 'r') as f:
+                    content = f.read()
+                project_content.append(f"File: {file_path}\n\n ```{content}```\n\n")
+    return '\n'.join(project_content)
 
 
 @click.command()
@@ -187,9 +220,15 @@ def main(
     api_key = os.getenv("GEMINI_API_KEY")
     genai.configure(api_key=api_key)
 
+    # Read the entire project content
+    project_content = read_project_files()
+
+    # Combine project content and diff
+    full_context = f"Project Content:\n\n{project_content}\n\nPull Request Diff:\n\n{diff}"
+
     # Request a code review
     chunked_reviews, summarized_review = get_review(
-        diff=diff,
+        context=full_context,
         extra_prompt=extra_prompt,
         model=model,
         temperature=temperature,
