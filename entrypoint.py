@@ -15,6 +15,7 @@ from typing import List
 
 import click
 import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import requests
 from loguru import logger
 
@@ -36,19 +37,19 @@ def check_required_env_vars():
 def get_review_prompt(extra_prompt: str = "") -> str:
     """Get a prompt template"""
     template = f"""
-    You are reviewing a project and its associated pull request. The context provided includes the entire project structure and content, followed by the pull request diff.
+    You are reviewing pull request. The context provided includes the entire project structure and content, followed by the pull request diff.
 
-    As an excellent software engineer and security expert, please analyze the project and the changes in the pull request. Consider the following:
+    As an excellent software engineer and security expert, please analyze the pull request (just the pull request. The whole project is just a reference, so you don't need to review the whole thing, just the pull request) Consider the following:
 
-    1. Overall project structure and code quality
-    2. Potential security vulnerabilities in the existing code
+    1. Overall pull request structure and code quality
+    2. Potential security vulnerabilities in the changed code
     3. Changes introduced in the pull request
     4. Improvements or issues in the pull request
     5. Suggestions for better code organization, performance, or security
 
     Provide a comprehensive review that includes:
-    - A summary of the project structure and any notable patterns or issues
-    - Comments on specific files or sections of code that require attention
+    - A summary of the pull request structure and any notable patterns or issues
+    - Comments on specific files or sections of pull request that require attention
     - Detailed analysis of the changes in the pull request
     - Suggestions for improvements or alternative implementations
 
@@ -63,12 +64,11 @@ def get_summarize_prompt() -> str:
     template = """
     Please provide a concise summary of your review, highlighting the most important findings and recommendations. Focus on:
 
-    1. Key strengths and weaknesses of the project
+    1. Key strengths and weaknesses of the pull request
     2. Critical issues or improvements needed in the pull request
     3. High-priority security concerns, if any
-    4. Top recommendations for enhancing the project and the proposed changes
 
-    Your summary should give a clear overview of the project state and the impact of the pull request.
+    Your summary should give a clear overview of the impact of the pull request.
     """
     return template
 
@@ -104,6 +104,7 @@ def chunk_string(input_string: str, chunk_size) -> List[str]:
 
 def get_review(
         context: str,
+        diff: str,
         extra_prompt: str,
         model: str,
         temperature: float,
@@ -113,21 +114,32 @@ def get_review(
         presence_penalty: float,
         prompt_chunk_size: int
 ):
-    """Get a review"""
-    # Chunk the prompt
+    """Get a review focusing on the PR changes"""
     review_prompt = get_review_prompt(extra_prompt=extra_prompt)
-    chunked_context_list = chunk_string(input_string=context, chunk_size=prompt_chunk_size)
     generation_config = {
         "temperature": temperature,
         "top_p": top_p,
         "top_k": 40,
         "max_output_tokens": max_tokens,
     }
-    genai_model = genai.GenerativeModel(model_name=model, generation_config=generation_config)
     
-    # Get summary by chunk
+    safety_settings = {
+        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+    }
+    
+    genai_model = genai.GenerativeModel(model_name=model, generation_config=generation_config, safety_settings=safety_settings)
+    
+    # Combine context and diff
+    full_input = f"{context}\n\nPull Request Changes:\n{diff}"
+    
+    # Chunk the input if necessary
+    chunked_inputs = chunk_string(input_string=full_input, chunk_size=prompt_chunk_size)
+    
     chunked_reviews = []
-    for chunked_context in chunked_context_list:
+    for chunked_input in chunked_inputs:
         convo = genai_model.start_chat(history=[
             {
                 "role": "user",
@@ -135,10 +147,10 @@ def get_review(
             },
             {
                 "role": "model",
-                "parts": ["Understood. I'm ready to review the project and pull request."]
+                "parts": ["Understood. I'm ready to review the pull request changes."]
             },
         ])
-        convo.send_message(chunked_context)
+        convo.send_message(chunked_input)
         review_result = convo.last.text
         logger.debug(f"Response AI: {review_result}")
         chunked_reviews.append(review_result)
@@ -147,15 +159,14 @@ def get_review(
         return chunked_reviews, chunked_reviews[0]
 
     if len(chunked_reviews) == 0:
-        summarize_prompt = "Say that you didn't find any relevant changes to comment on any file"
-    else:
-        summarize_prompt = get_summarize_prompt()
+        return [], "No relevant changes found to comment on."
 
+    summarize_prompt = get_summarize_prompt()
     chunked_reviews_join = "\n".join(chunked_reviews)
     convo = genai_model.start_chat(history=[])
-    convo.send_message(summarize_prompt+"\n\n"+chunked_reviews_join)
+    convo.send_message(summarize_prompt + "\n\n" + chunked_reviews_join)
     summarized_review = convo.last.text
-    logger.debug(f"Response AI: {summarized_review}")
+    logger.debug(f"Summarized review: {summarized_review}")
     return chunked_reviews, summarized_review
 
 
@@ -228,7 +239,8 @@ def main(
 
     # Request a code review
     chunked_reviews, summarized_review = get_review(
-        context=full_context,
+        context=project_content,
+        diff=diff,
         extra_prompt=extra_prompt,
         model=model,
         temperature=temperature,
