@@ -112,7 +112,8 @@ def get_review(
         max_tokens: int,
         top_p: float,
         frequency_penalty: float,
-        presence_penalty: float
+        presence_penalty: float,
+        prompt_chunk_size: int
 ):
     """Get a review focusing on the PR changes"""
     review_prompt = get_review_prompt(extra_prompt=extra_prompt)
@@ -120,8 +121,7 @@ def get_review(
         "temperature": temperature,
         "top_p": top_p,
         "top_k": 40,
-        "max_output_tokens": 8192,
-        "response_mime_type": "text/plain",
+        "max_output_tokens": max_tokens,
     }
     
     safety_settings = {
@@ -133,13 +133,56 @@ def get_review(
     
     genai_model = genai.GenerativeModel(model_name=model, generation_config=generation_config, safety_settings=safety_settings)
     
-    # Combine context, review prompt, and diff
-    full_input = f"{review_prompt}\n\nProject Context:\n{context}\n\nPull Request Changes:\n{diff}"
+    # Combine context and diff
+    full_input = f"{context}\n\nPull Request Changes:\n{diff}"
     
-    review_result = genai_model.generate_content(full_input, generation_config=generation_config, safety_settings=safety_settings)
-    logger.debug(f"Response AI: {review_result}")
+    # Chunk the input if necessary
+    chunked_inputs = chunk_string(input_string=full_input, chunk_size=prompt_chunk_size)
+    
+    chunked_reviews = []
+    for chunked_input in chunked_inputs:
+        convo = genai_model.start_chat(history=[
+            {
+                "role": "user",
+                "parts": [review_prompt]
+            },
+            {
+                "role": "model",
+                "parts": ["Understood. I'm ready to review the pull request changes."]
+            },
+        ])
+        convo.send_message(chunked_input)
+        review_result = convo.last.text
+        logger.debug(f"Response AI: {review_result}")
+        chunked_reviews.append(review_result)
 
-    return review_result
+    if len(chunked_reviews) == 1:
+        return chunked_reviews, chunked_reviews[0]
+
+    if len(chunked_reviews) == 0:
+        return [], "No relevant changes found to comment on."
+
+    summarize_prompt = get_summarize_prompt()
+    chunked_reviews_join = "\n".join(chunked_reviews)
+    convo = genai_model.start_chat(history=[])
+    convo.send_message(summarize_prompt + "\n\n" + chunked_reviews_join)
+    summarized_review = convo.last.text
+    logger.debug(f"Summarized review: {summarized_review}")
+    return chunked_reviews, summarized_review
+
+
+def format_review_comment(summarized_review: str, chunked_reviews: List[str]) -> str:
+    """Format reviews"""
+    if len(chunked_reviews) == 1:
+        return summarized_review
+    unioned_reviews = "\n".join(chunked_reviews)
+    review = f"""<details>
+    <summary>{summarized_review}</summary>
+    {unioned_reviews}
+    </details>
+    """
+    return review
+
 
 def read_project_files(exclude_dirs=['.github', '.idea']):
     project_content = []
@@ -195,7 +238,7 @@ def main(
     logger.debug(f"Project content: {project_content}")
     
     # Request a code review
-    review = get_review(
+    chunked_reviews, summarized_review = get_review(
         context=project_content,
         diff=diff,
         extra_prompt=extra_prompt,
@@ -204,18 +247,22 @@ def main(
         max_tokens=max_tokens,
         top_p=top_p,
         frequency_penalty=frequency_penalty,
-        presence_penalty=presence_penalty
+        presence_penalty=presence_penalty,
+        prompt_chunk_size=diff_chunk_size
     )
+    logger.debug(f"Summarized review: {summarized_review}")
+    logger.debug(f"Chunked reviews: {chunked_reviews}")
 
     # Format reviews
-
+    review_comment = format_review_comment(summarized_review=summarized_review,
+                                           chunked_reviews=chunked_reviews)
     # Create a comment to a pull request
     create_a_comment_to_pull_request(
         github_token=os.getenv("GITHUB_TOKEN"),
         github_repository=os.getenv("GITHUB_REPOSITORY"),
         pull_request_number=int(os.getenv("GITHUB_PULL_REQUEST_NUMBER")),
         git_commit_hash=os.getenv("GIT_COMMIT_HASH"),
-        body=review.text
+        body=review_comment
     )
 
 
